@@ -2,10 +2,12 @@ package tardis.implementation;
 
 import static tardis.implementation.Util.shorten;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -15,6 +17,13 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import jbse.mem.Clause;
+
+import weka.core.Instances;
+import weka.core.Attribute;
+import weka.core.DenseInstance;
+import weka.core.Instance;
+import weka.classifiers.functions.MultilayerPerceptron;
+
 
 /**
  * Stores the tree of the explored and yet-to-explored paths, 
@@ -34,14 +43,30 @@ public final class TreePath {
     private final HashMap<String, Integer> hitsCounterMap = new HashMap<>(); //TODO ConcurrentHashMap?
     
     /** Set used as training set to calculate the infeasibility index. */
-    public final HashSet<TrainigSetItem> trainingSet = new HashSet<>();
+    // public final HashSet<TrainigSetItem> trainingSet = new HashSet<>();
+    
+    /** Set used to train MultiLayerPerceptron algorithm */
+    public Instances trainingSet = null;
+    private MultilayerPerceptron classifier = new MultilayerPerceptron();
+    
+    /** JBSEResultInputOutputBuffer to update the buffer */
+    public JBSEResultInputOutputBuffer buffer ;
+    private int OLD_NUMINSTANCES = 0;
+    private int COUNT_FEED = 15;
+    
+    /** to print the date */
+    SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss");  
+    
+    
+    /** Counts the number of PC added to the trainingSet */
     
     private enum NodeStatus { ATTEMPTED, COVERED };
     
     /** The size of the bloom filter structures. */
     private final int N_ROWS = 16;
 	private final int N_COLUMNS = 64;
-    
+   
+	
     /**
      * A node in the {@link TreePath}.
      * 
@@ -500,6 +525,30 @@ public final class TreePath {
      *         0: infeasible(0) with voting 3
      */
     synchronized int getInfeasibilityIndex(Iterable<Clause> path) {
+    	double[] results = null; 
+    	int index = 0;
+    	if (trainingSet.numInstances() >= 3) {
+    		final BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
+    		if (bloomFilterStructure == null) {
+                return -1;
+            }
+    		Instance i = this.feedTrainingSet(bloomFilterStructure, -1, false);
+    		try {
+    			results = this.classifier.distributionForInstance(i); 
+    			System.out.println("~ the results are : " + results[0] + ", " + results[1]);
+    		} catch (Exception e) {
+    			throw new AssertionError("Exception to predict the result value");
+    		}
+    	}
+    	cacheIndices(index, (Collection<Clause>) path, "infeasibility");
+    	if(results[0] > results[1])
+    		return 1;
+    	else
+    		return 0;
+    	
+    	
+    	// old Matteos's code
+    	/**
     	int index = 0;
     	if (trainingSet.size() >= 3) {
     		final BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
@@ -527,6 +576,7 @@ public final class TreePath {
     	}
     	cacheIndices(index, (Collection<Clause>) path, "infeasibility");
     	return index;
+    	*/
     }
     
     /**
@@ -592,7 +642,17 @@ public final class TreePath {
      *        false otherwise.
      */
     synchronized void PCToBloomFilterEvosuite(Collection<Clause> path, boolean evosuiteResult) {
-  		if(path != null) {
+    	if (path != null) {
+    		BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
+    		if (evosuiteResult) {
+    			this.trainingSet.add(this.feedTrainingSet(bloomFilterStructure, 1, true));
+    		} else {
+    			this.trainingSet.add(this.feedTrainingSet(bloomFilterStructure, 0, true));
+    		}
+    	}
+    	
+    	// old Matteo's code
+  		/**if(path != null) {
   			BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
   			//add to trainingSet
   			if (evosuiteResult) {
@@ -601,8 +661,81 @@ public final class TreePath {
   			else {
   				trainingSet.add(new TrainigSetItem(bloomFilterStructure, 0));
   			}
-  		}
+  		}*/
   	}
+    
+    
+    /**
+     * Transforms a bloomFilterStructure in an Instance that could be added to the trainingSet.
+     * 
+     * @param bloomFilterStructure is the structure that represents the PC.
+     * @param infeasibilityClass is the infeasibility label for the PC.
+     * 
+     */
+    synchronized Instance feedTrainingSet(BitSet[] bloomFilterStructure, int infeasibilityClass, boolean canUpdate) {
+    	if (this.trainingSet == null) { // if training set doesn't exist yet
+			ArrayList<Attribute> attributes = new ArrayList<Attribute>();
+			int count = 0;
+			List<String> AttributesValues = new ArrayList<String>();
+			AttributesValues.add("true");
+			AttributesValues.add("false");
+			for (int i = 0 ; i < 16 ; i++) { // creating all the clauses attributes
+				for (int j = 0 ; j < 64 ; j++) {
+					Attribute a = new Attribute("attribute" + count, AttributesValues, count);
+					count++;
+					attributes.add(a);
+				}
+			}
+			Attribute infeasibility = new Attribute("infeasibility", AttributesValues, 1024); // creating the infeasibility attribute
+			attributes.add(infeasibility);
+			trainingSet = new Instances("TrainingSet", attributes, 1000);
+			trainingSet.setClass(infeasibility); // setting the class attribute
+			
+			
+		}
+    	Instance singleInstance = new DenseInstance(1025);
+    	singleInstance.setDataset(this.trainingSet);
+    	int count1 = 0;
+    	for (int i = 0 ; i < 16 ; i++) { // adding instance's values
+			for (int j = 0 ; j < 64 ; j++) {
+				singleInstance.setValue(count1, bloomFilterStructure[i].get(j) + "");
+				count1++;
+			}
+		}
+    	if (infeasibilityClass == 1) {
+    		singleInstance.setValue(1024, "true");
+    	} else if (infeasibilityClass == 0) {
+    		singleInstance.setValue(1024, "false");
+    	}
+    	try {
+    		if(this.trainingSet.numInstances() > this.OLD_NUMINSTANCES && canUpdate) {
+    			if (this.trainingSet.numInstances() == 1) { // building the first classifier model
+        			System.out.println("~ start first classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format( new Date()));
+        			String[] options = weka.core.Utils.splitOptions("-H 200");
+        			classifier.setOptions(options);
+        			classifier.buildClassifier(this.trainingSet);
+        			System.out.println("~ end first classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format(new Date()));
+        			this.buffer.updateInfeasibilityIndex();
+        		} else if (this.trainingSet.numInstances() > 0 && this.trainingSet.numInstances() % this.COUNT_FEED == 0) { // building a new classifier model every 15 Instance making
+        			System.out.println("~ start another classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format(new Date()));
+                	classifier.buildClassifier(this.trainingSet);
+                	System.out.println("~ end another classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format(new Date()));
+                	this.buffer.updateInfeasibilityIndex();
+                	this.COUNT_FEED = this.COUNT_FEED * 2;
+                }
+    			this.OLD_NUMINSTANCES = this.trainingSet.numInstances();
+    		}
+    	} catch (Exception e) {
+    		throw new AssertionError("Can't update the classifier model, this time. ");
+    		
+    	}
+    	
+    	
+    	
+    	return singleInstance;
+    	
+    }
+    
     
     /**
      * Calculates multiple bloom filter structures from a path condition generated by an EvoSuite seed test.
@@ -631,7 +764,8 @@ public final class TreePath {
   			String[] generalArraySliced = (String[]) outputSliced[1];
   			BitSet[] bloomFilterStructure = bloomFilter(specificArraySliced, generalArraySliced);
   			//add to trainingSet
-  			trainingSet.add(new TrainigSetItem(bloomFilterStructure, 1));
+  			Instance completeInstance = this.feedTrainingSet(bloomFilterStructure, 1, true);
+  			this.trainingSet.add(completeInstance);
   			
   			//remove the last clause and rerun the workflow
   			for (int i=specificArray.length - 1; i > 0; i--) {
@@ -647,7 +781,8 @@ public final class TreePath {
   				String[] specificArraySlicedNoLast = (String[]) outputSlicedNoLast[0];
   				String[] generalArraySlicedNoLast = (String[]) outputSlicedNoLast[1];
   				BitSet[] bloomFilterStructureNoLast = bloomFilter(specificArraySlicedNoLast, generalArraySlicedNoLast);
-  				trainingSet.add(new TrainigSetItem(bloomFilterStructureNoLast, 1));
+  				Instance instanceWithoutLast = this.feedTrainingSet(bloomFilterStructureNoLast, 1, true);
+  				this.trainingSet.add(instanceWithoutLast);
   			}
   		}
   	}

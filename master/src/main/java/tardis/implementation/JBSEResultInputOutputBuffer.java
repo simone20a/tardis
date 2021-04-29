@@ -13,6 +13,8 @@ import jbse.mem.Clause;
 import tardis.framework.InputBuffer;
 import tardis.framework.OutputBuffer;
 
+
+
 /**
  * An {@link InputBuffer} and {@link OutputBuffer} for {@link JBSEResult}s that
  * prioritizes {@link JBSEResult}s based on several heuristics.
@@ -22,10 +24,12 @@ import tardis.framework.OutputBuffer;
  * @param <E> the type of the items stored in the buffer.
  */
 public final class JBSEResultInputOutputBuffer implements InputBuffer<JBSEResult>, OutputBuffer<JBSEResult> {
-    private static final int[] INDEX_VALUES = new int[] {3, 2, 1, 0};
-    private static final int[] PROBABILITY_VALUES = new int[] {50, 30, 15, 5};
-    private final int THRESHOLD = 200;
+    private static final int[] INDEX_VALUES = new int[] {1, 0};
+    private static final int[] PROBABILITY_VALUES = new int[] {80, 20};
+    private final int THRESHOLD = 20;
     private int OLD_TRAININGSET_SIZE = 0;
+    
+    
     
     private final HashMap<Integer, LinkedBlockingQueue<JBSEResult>> map = new HashMap<>();
     private final TreePath treePath;
@@ -39,19 +43,24 @@ public final class JBSEResultInputOutputBuffer implements InputBuffer<JBSEResult
 
     @Override
     public synchronized boolean add(JBSEResult item) {
-        final int improvabilityindex = this.treePath.getImprovabilityIndex(item.getFinalState().getPathCondition());
-        final int noveltyIndex = this.treePath.getNoveltyIndex(item.getFinalState().getPathCondition());
+        //final int improvabilityindex = this.treePath.getImprovabilityIndex(item.getFinalState().getPathCondition());
+        //final int noveltyIndex = this.treePath.getNoveltyIndex(item.getFinalState().getPathCondition());
         final int infeasibilityIndex = this.treePath.getInfeasibilityIndex(item.getFinalState().getPathCondition());
-        if (improvabilityindex < 0) {
+        /*
+         * if (improvabilityindex < 0) {
             throw new AssertionError("Apparently a JBSEResult item was not inserted in the TreePath (improvability index is negative)");
         }
         if (noveltyIndex < 0) {
             throw new AssertionError("Apparently a JBSEResult item was not inserted in the TreePath (noveltyIndex index is negative)");
         }
+        */
         if (infeasibilityIndex < 0) {
             throw new AssertionError("Apparently a JBSEResult item was not inserted in the TreePath (infeasibilityIndex index is negative)");
         }
-        final LinkedBlockingQueue<JBSEResult> queueInMap = this.map.get(calculateQueue(improvabilityindex, noveltyIndex, infeasibilityIndex));
+        
+        System.out.println("~ Adding to " + infeasibilityIndex);
+        
+        final LinkedBlockingQueue<JBSEResult> queueInMap = this.map.get(infeasibilityIndex);
         return queueInMap.add(item);
     }
 
@@ -150,15 +159,16 @@ public final class JBSEResultInputOutputBuffer implements InputBuffer<JBSEResult
     	synchronized (this.treePath) {
 			//Update all the index only if the trainingSet is increased by THRESHOLD elements,
 			//i.e. reclassify everything only if the trainingSet has grown by a significant value.
-    		if (this.treePath.trainingSet.size() > OLD_TRAININGSET_SIZE+THRESHOLD && !this.isEmpty()) {
-    			OLD_TRAININGSET_SIZE = this.treePath.trainingSet.size();
+    		System.out.println("~ updating buffer");
+    		if (!this.isEmpty()) {
+    			OLD_TRAININGSET_SIZE = this.treePath.trainingSet.numInstances();
     			for (int index : this.map.keySet()) {
     				for (JBSEResult bufferedJBSEResult : this.map.get(index)) {
     					final List<Clause> pathCondition = bufferedJBSEResult.getFinalState().getPathCondition();
     					final int newIndex = this.treePath.getInfeasibilityIndex(pathCondition);
-    					final int improvabilityIndexCached = this.treePath.getCachedIndices(pathCondition, "improvability");
-    					final int noveltyIndexCached = this.treePath.getCachedIndices(pathCondition, "novelty");
-    					final int queue = calculateQueue(improvabilityIndexCached, noveltyIndexCached, newIndex);
+    					// final int improvabilityIndexCached = this.treePath.getCachedIndices(pathCondition, "improvability");
+    					// final int noveltyIndexCached = this.treePath.getCachedIndices(pathCondition, "novelty");
+    					final int queue = newIndex;
     					if (queue == index) {
     						continue;
     					}

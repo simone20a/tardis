@@ -55,7 +55,7 @@ public final class PerformerJBSE extends Performer<EvosuiteResult, JBSEResult> {
     private static final Logger LOGGER = LogManager.getFormatterLogger(PerformerJBSE.class);
     
     private final Options o;
-    private final JBSEResultInputOutputBuffer out;
+    // private final JBSEResultInputOutputBuffer out;
     private final TreePath treePath;
     private final HashMap<String, State> initialStateCache = new HashMap<>();
     private AtomicLong pathCoverage = new AtomicLong(0);
@@ -63,7 +63,7 @@ public final class PerformerJBSE extends Performer<EvosuiteResult, JBSEResult> {
     public PerformerJBSE(Options o, InputBuffer<EvosuiteResult> in, JBSEResultInputOutputBuffer out, TreePath treePath) {
         super(in, out, o.getNumOfThreadsJBSE(), 1, o.getThrottleFactorJBSE(), o.getGlobalTimeBudgetDuration(), o.getGlobalTimeBudgetUnit());
         this.o = o.clone();
-        this.out = out;
+        //this.out = out;
         this.treePath = treePath;
     }
 
@@ -172,14 +172,15 @@ public final class PerformerJBSE extends Performer<EvosuiteResult, JBSEResult> {
             final Set<String> newCoveredBranchesTarget = filterBranchesTarget(newCoveredBranches);            
             final Set<String> newCoveredBranchesUnsafe = filterBranchesUnsafe(newCoveredBranches);
             
-            //recalculates indices of items in output queue
+            /*//recalculates indices of items in output queue
             if (newCoveredBranchesTarget.size() > 0) {
                 this.out.updateImprovabilityIndex(newCoveredBranchesTarget);
             }
             //TODO find a condition to update this index less frequently?
             this.out.updateNoveltyIndex(rp.getCoverage());
+            */
             //TODO is there a better place in the code to update this index?
-            this.out.updateInfeasibilityIndex();
+            // this.out.updateInfeasibilityIndex();
 
             //produces feedback and emits the test
             final Coverage coverage = this.o.getCoverage();

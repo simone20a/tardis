@@ -102,11 +102,16 @@ public final class Main {
             final TreePath treePath = new TreePath();
 
             //...the communication buffers...
+            // vengono inserite le path condiition alternative da cui si prova a generare i casi di test
             final JBSEResultInputOutputBuffer pathConditionBuffer = new JBSEResultInputOutputBuffer(treePath);
+            treePath.buffer = pathConditionBuffer;
+            // Vengono inseriti i casi di test generati da Evoswite e da cui si prova a generare path condition alternative
             final QueueInputOutputBuffer<EvosuiteResult> testCaseBuffer = new QueueInputOutputBuffer<>();
 
             //...the performers and the termination manager
+            // Si occupa dei casi di test 
             final PerformerEvosuite performerEvosuite = new PerformerEvosuite(this.o, pathConditionBuffer, testCaseBuffer, treePath);
+            // Genera path condition alternative
             final PerformerJBSE performerJBSE = new PerformerJBSE(this.o, testCaseBuffer, pathConditionBuffer, treePath);
             final TerminationManager terminationManager = new TerminationManager(this.o.getGlobalTimeBudgetDuration(), this.o.getGlobalTimeBudgetUnit(), performerJBSE, performerEvosuite);
 
