@@ -7,6 +7,7 @@ import static tardis.implementation.Util.stream;
 
 import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -105,6 +106,22 @@ public final class Main {
             // vengono inserite le path condiition alternative da cui si prova a generare i casi di test
             final JBSEResultInputOutputBuffer pathConditionBuffer = new JBSEResultInputOutputBuffer(treePath);
             treePath.buffer = pathConditionBuffer;
+            treePath.csvWriterClassification = new FileWriter("C:/Users/Simone/Desktop/Simone/stage/mainWorkspace/classification.csv");
+            treePath.csvWriterClassification.append("PathConditionID");
+            treePath.csvWriterClassification.append(",");
+            treePath.csvWriterClassification.append("Type");
+            treePath.csvWriterClassification.append(",");
+            treePath.csvWriterClassification.append("Label");
+            treePath.csvWriterClassification.append(",");
+            treePath.csvWriterClassification.append("BloomFilterStructure");
+            treePath.csvWriterClassification.append(",");
+            treePath.csvWriterClassification.append("PathCondition");
+            treePath.csvWriterClassification.append("\n");
+            treePath.csvWriterSlicing = new FileWriter("C:/Users/Simone/Desktop/Simone/stage/mainWorkspace/slicing.csv");
+            treePath.csvWriterSlicing.append("PathConditionID");
+            treePath.csvWriterSlicing.append(",");
+            treePath.csvWriterSlicing.append("SlicingFormula");
+            treePath.csvWriterSlicing.append("\n");
             // Vengono inseriti i casi di test generati da Evoswite e da cui si prova a generare path condition alternative
             final QueueInputOutputBuffer<EvosuiteResult> testCaseBuffer = new QueueInputOutputBuffer<>();
 

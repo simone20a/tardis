@@ -2,6 +2,8 @@ package tardis.implementation;
 
 import static tardis.implementation.Util.shorten;
 
+import java.io.FileWriter;
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.BitSet;
@@ -48,11 +50,13 @@ public final class TreePath {
     /** Set used to train MultiLayerPerceptron algorithm */
     public Instances trainingSet = null;
     private MultilayerPerceptron classifier = new MultilayerPerceptron();
+    public FileWriter csvWriterClassification;
+    public FileWriter csvWriterSlicing;
     
     /** JBSEResultInputOutputBuffer to update the buffer */
     public JBSEResultInputOutputBuffer buffer ;
     private int OLD_NUMINSTANCES = 0;
-    private int COUNT_FEED = 15;
+    private int COUNT_FEED = 30;
     
     /** to print the date */
     SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss");  
@@ -184,7 +188,7 @@ public final class TreePath {
 			this.infeasibilityIndex = infeasibilityIndex;
 		}
     }
-
+    
     /**
      * The root {@link Node}.
      */
@@ -527,8 +531,8 @@ public final class TreePath {
     synchronized int getInfeasibilityIndex(Iterable<Clause> path) {
     	double[] results = null; 
     	int index = 0;
+    	final BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
     	if (trainingSet.numInstances() >= 3) {
-    		final BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
     		if (bloomFilterStructure == null) {
                 return -1;
             }
@@ -541,10 +545,13 @@ public final class TreePath {
     		}
     	}
     	cacheIndices(index, (Collection<Clause>) path, "infeasibility");
-    	if(results[0] > results[1])
+    	if(results[0] > results[1]) {
+    		this.createClassificationCsv("prediction", "feasible", bloomFilterStructure, path);
     		return 1;
-    	else
+    	} else {
+    		this.createClassificationCsv("prediction", "infeasible", bloomFilterStructure, path);
     		return 0;
+    	}
     	
     	
     	// old Matteos's code
@@ -624,6 +631,7 @@ public final class TreePath {
     		String[] specificArraySliced = (String[]) outputSliced[0];
     		String[] generalArraySliced = (String[]) outputSliced[1];
     		BitSet[] bloomFilterStructure = bloomFilter(specificArraySliced, generalArraySliced);
+    		this.createSlicingCsv(specificArraySliced, path);
     		return bloomFilterStructure;
     	}
     	else {
@@ -646,9 +654,11 @@ public final class TreePath {
     		BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
     		if (evosuiteResult) {
     			this.trainingSet.add(this.feedTrainingSet(bloomFilterStructure, 1, true));
+    			this.createClassificationCsv("observed", "feasible", bloomFilterStructure, path);
     		} else {
     			this.trainingSet.add(this.feedTrainingSet(bloomFilterStructure, 0, true));
-    		}
+    			this.createClassificationCsv("observed", "infeasible", bloomFilterStructure, path);
+    		}  	
     	}
     	
     	// old Matteo's code
@@ -663,6 +673,54 @@ public final class TreePath {
   			}
   		}*/
   	}
+    
+    /** Create a csv file with Execution Informations every time Tardis classify or add a PC to the training set. */
+    
+    synchronized void createClassificationCsv(String type, String label, BitSet[] bloomFilterStructure, Iterable<Clause> pathCondition) {
+    	try {
+    		csvWriterClassification.append(System.identityHashCode(pathCondition) + "");
+    		csvWriterClassification.append(",");
+    		csvWriterClassification.append(type + "");
+    		csvWriterClassification.append(",");
+	    	csvWriterClassification.append(label);
+			csvWriterClassification.append(",");
+			for (BitSet bs : bloomFilterStructure) {
+				for (int i = 0; i < bs.size(); i++) {
+					if(bs.get(i)){
+						csvWriterClassification.append(1 + "");
+					}else {
+						csvWriterClassification.append(0 + "");
+					}
+				}
+			}
+			csvWriterClassification.append(",");
+			csvWriterClassification.append(Util.stringifyPathCondition(shorten((Collection<Clause>) pathCondition)));
+			csvWriterClassification.append("\n");
+			csvWriterClassification.flush();
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+    }
+    
+    /** Create a csv file with Slicing Informations */
+    
+    synchronized void createSlicingCsv(String[] slicingFormula, Iterable<Clause> pathCondition) {
+    	try {
+			csvWriterSlicing.append(Util.stringifyPathCondition(shorten((Collection<Clause>) pathCondition)));
+			csvWriterSlicing.append(",");
+			for (int i = 0 ; i < slicingFormula.length ; i++) {
+				csvWriterSlicing.append(slicingFormula[i]);
+				if(i != slicingFormula.length - 1)
+					csvWriterSlicing.append("&&");
+			}
+			csvWriterSlicing.append("\n");
+			csvWriterSlicing.flush();
+
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+    }
     
     
     /**
@@ -721,7 +779,7 @@ public final class TreePath {
                 	classifier.buildClassifier(this.trainingSet);
                 	System.out.println("~ end another classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format(new Date()));
                 	this.buffer.updateInfeasibilityIndex();
-                	this.COUNT_FEED = this.COUNT_FEED * 2;
+                	//this.COUNT_FEED = this.COUNT_FEED + 10;
                 }
     			this.OLD_NUMINSTANCES = this.trainingSet.numInstances();
     		}
@@ -766,24 +824,27 @@ public final class TreePath {
   			//add to trainingSet
   			Instance completeInstance = this.feedTrainingSet(bloomFilterStructure, 1, true);
   			this.trainingSet.add(completeInstance);
+  			this.createClassificationCsv("observed", "feasible", bloomFilterStructure, path);
+ 
+  				//remove the last clause and rerun the workflow
+  				for (int i=specificArray.length - 1; i > 0; i--) {
+  					String[] specificArrayNoLast = new String[i];
+  					Object[] clauseArrayNoLast = new Object[i];
+  					String[] generalArrayNoLast = new String[i];
+  					System.arraycopy(specificArray, 0, specificArrayNoLast, 0, i);
+  					System.arraycopy(clauseArray, 0, clauseArrayNoLast, 0, i);
+  					System.arraycopy(generalArray, 0, generalArrayNoLast, 0, i);
+  					
+  					//Slicing call
+  					Object[] outputSlicedNoLast = SlicingManager.Slicing(specificArrayNoLast, clauseArrayNoLast, generalArrayNoLast);
+  					String[] specificArraySlicedNoLast = (String[]) outputSlicedNoLast[0];
+  					String[] generalArraySlicedNoLast = (String[]) outputSlicedNoLast[1];
+  					BitSet[] bloomFilterStructureNoLast = bloomFilter(specificArraySlicedNoLast, generalArraySlicedNoLast);
+  					Instance instanceWithoutLast = this.feedTrainingSet(bloomFilterStructureNoLast, 1, true);
+  					this.trainingSet.add(instanceWithoutLast);
+  					this.createClassificationCsv("observed", "feasible", bloomFilterStructureNoLast, path);
+  				}
   			
-  			//remove the last clause and rerun the workflow
-  			for (int i=specificArray.length - 1; i > 0; i--) {
-  				String[] specificArrayNoLast = new String[i];
-  				Object[] clauseArrayNoLast = new Object[i];
-  				String[] generalArrayNoLast = new String[i];
-  				System.arraycopy(specificArray, 0, specificArrayNoLast, 0, i);
-  				System.arraycopy(clauseArray, 0, clauseArrayNoLast, 0, i);
-  				System.arraycopy(generalArray, 0, generalArrayNoLast, 0, i);
-  				
-  				//Slicing call
-  				Object[] outputSlicedNoLast = SlicingManager.Slicing(specificArrayNoLast, clauseArrayNoLast, generalArrayNoLast);
-  				String[] specificArraySlicedNoLast = (String[]) outputSlicedNoLast[0];
-  				String[] generalArraySlicedNoLast = (String[]) outputSlicedNoLast[1];
-  				BitSet[] bloomFilterStructureNoLast = bloomFilter(specificArraySlicedNoLast, generalArraySlicedNoLast);
-  				Instance instanceWithoutLast = this.feedTrainingSet(bloomFilterStructureNoLast, 1, true);
-  				this.trainingSet.add(instanceWithoutLast);
-  			}
   		}
   	}
 
