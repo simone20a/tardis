@@ -187,6 +187,30 @@ public final class Options implements Cloneable {
     @Option(name = "-max_simple_array_length",
             usage = "Maximum size of arrays with simple representation")
     private int maxSimpleArrayLength = 100_000;
+    
+    @Option(name = "-single_clauses_mode",
+    		usage = "Tardis splits every Feasible PC and adds every single clause to the training set")
+    private boolean singleClausesMode = false;
+    
+    @Option(name = "-split-bloom-filter-mode",
+    		usage = "Enabling Tardis to split the bloom filter structure into two parts, the first to represent the PC prefix and the second to represent the PC suffix")
+    private boolean splitBloomFilterMode;
+
+    public boolean isSplitBloomFilterMode() {
+		return splitBloomFilterMode;
+	}
+
+	public void setSplitBloomFilterMode(boolean splitBloomFilter) {
+		this.splitBloomFilterMode = splitBloomFilter;
+	}
+
+	public boolean isSingleClausesMode() {
+		return singleClausesMode;
+	}
+
+	public void setSingleClausesMode(boolean singleClausesMode) {
+		this.singleClausesMode = singleClausesMode;
+	}
 
     public boolean getHelp() {
         return this.help;

@@ -67,6 +67,7 @@ public final class Main {
      * The configuration {@link Options}.
      */
     private final Options o;
+    
 
     /**
      * Constructor.
@@ -106,6 +107,7 @@ public final class Main {
             // vengono inserite le path condiition alternative da cui si prova a generare i casi di test
             final JBSEResultInputOutputBuffer pathConditionBuffer = new JBSEResultInputOutputBuffer(treePath);
             treePath.buffer = pathConditionBuffer;
+            treePath.o = this.o;
             treePath.csvWriterClassification = new FileWriter("C:/Users/Simone/Desktop/Simone/stage/mainWorkspace/classification.csv");
             treePath.csvWriterClassification.append("PathConditionID");
             treePath.csvWriterClassification.append(",");

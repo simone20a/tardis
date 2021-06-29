@@ -6,6 +6,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collection;
 import java.util.Collections;
@@ -18,8 +19,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import jbse.mem.Clause;
+import com.github.javaparser.ast.expr.ThisExpr;
 
+import jbse.mem.Clause;
+import tardis.Options;
 import weka.core.Instances;
 import weka.core.Attribute;
 import weka.core.DenseInstance;
@@ -48,15 +51,19 @@ public final class TreePath {
     // public final HashSet<TrainigSetItem> trainingSet = new HashSet<>();
     
     /** Set used to train MultiLayerPerceptron algorithm */
+    public HashSet<String> instanceSet = new HashSet<>();
     public Instances trainingSet = null;
     private MultilayerPerceptron classifier = new MultilayerPerceptron();
     public FileWriter csvWriterClassification;
     public FileWriter csvWriterSlicing;
     
+    /** Options object */
+    public Options o;
+    
     /** JBSEResultInputOutputBuffer to update the buffer */
     public JBSEResultInputOutputBuffer buffer ;
     private int OLD_NUMINSTANCES = 0;
-    private int COUNT_FEED = 30;
+    private int COUNT_FEED = 50;
     
     /** to print the date */
     SimpleDateFormat formatter = new SimpleDateFormat("HH:mm:ss");  
@@ -536,7 +543,7 @@ public final class TreePath {
     		if (bloomFilterStructure == null) {
                 return -1;
             }
-    		Instance i = this.feedTrainingSet(bloomFilterStructure, -1, false);
+    		Instance i = this.createTrainingSetInstance(bloomFilterStructure, -1, false);
     		try {
     			results = this.classifier.distributionForInstance(i); 
     			System.out.println("~ the results are : " + results[0] + ", " + results[1]);
@@ -546,10 +553,10 @@ public final class TreePath {
     	}
     	cacheIndices(index, (Collection<Clause>) path, "infeasibility");
     	if(results[0] > results[1]) {
-    		this.createClassificationCsv("prediction", "feasible", bloomFilterStructure, path);
+    		this.createClassificationCsv("prediction", "feasible", bloomFilterStructure, Util.stringifyPathCondition(shorten((Collection<Clause>) path)));
     		return 1;
     	} else {
-    		this.createClassificationCsv("prediction", "infeasible", bloomFilterStructure, path);
+    		this.createClassificationCsv("prediction", "infeasible", bloomFilterStructure, Util.stringifyPathCondition(shorten((Collection<Clause>) path)));
     		return 0;
     	}
     	
@@ -653,11 +660,24 @@ public final class TreePath {
     	if (path != null) {
     		BitSet[] bloomFilterStructure = getInfeasibilityIndexBloomFilterStructure(path);
     		if (evosuiteResult) {
-    			this.trainingSet.add(this.feedTrainingSet(bloomFilterStructure, 1, true));
-    			this.createClassificationCsv("observed", "feasible", bloomFilterStructure, path);
+    			if (this.o.isSingleClausesMode()) {
+  					String PathToString = Util.stringifyPathCondition(shorten(path));
+  		    		//split pc clauses into array
+  		    		String[] generalArray = PathToString.split(" && ");
+  		    		String[] specificArray = PathToString.split(" && ");
+  		    		//generate general clauses
+  		    		for (int i=0; i < generalArray.length; i++){
+  		    			generalArray[i]=generalArray[i].replaceAll("[0-9]", "");
+  		    		}
+  		    		for (int i = 0 ; i < generalArray.length ; i++) {
+  		    			BitSet[] singleClauseBloomFilterStructure = this.bloomFilter(Arrays.copyOfRange(specificArray, i, i + 1), Arrays.copyOfRange(generalArray, i, i + 1));
+  		    			this.addToTrainingSet(this.createTrainingSetInstance(singleClauseBloomFilterStructure, 1, true), "observed", "feasible", singleClauseBloomFilterStructure, specificArray[i]);
+  		    		}
+  				} else {
+  					this.addToTrainingSet(this.createTrainingSetInstance(bloomFilterStructure, 1, true), "observed", "feasible", bloomFilterStructure, Util.stringifyPathCondition(shorten((Collection<Clause>) path)));
+  				}
     		} else {
-    			this.trainingSet.add(this.feedTrainingSet(bloomFilterStructure, 0, true));
-    			this.createClassificationCsv("observed", "infeasible", bloomFilterStructure, path);
+    			this.addToTrainingSet(this.createTrainingSetInstance(bloomFilterStructure, 0, true), "observed", "infeasible", bloomFilterStructure, Util.stringifyPathCondition(shorten((Collection<Clause>) path)));
     		}  	
     	}
     	
@@ -676,7 +696,7 @@ public final class TreePath {
     
     /** Create a csv file with Execution Informations every time Tardis classify or add a PC to the training set. */
     
-    synchronized void createClassificationCsv(String type, String label, BitSet[] bloomFilterStructure, Iterable<Clause> pathCondition) {
+    synchronized void createClassificationCsv(String type, String label, BitSet[] bloomFilterStructure, String pathCondition) {
     	try {
     		csvWriterClassification.append(System.identityHashCode(pathCondition) + "");
     		csvWriterClassification.append(",");
@@ -694,7 +714,7 @@ public final class TreePath {
 				}
 			}
 			csvWriterClassification.append(",");
-			csvWriterClassification.append(Util.stringifyPathCondition(shorten((Collection<Clause>) pathCondition)));
+			csvWriterClassification.append(pathCondition);
 			csvWriterClassification.append("\n");
 			csvWriterClassification.flush();
 
@@ -730,7 +750,7 @@ public final class TreePath {
      * @param infeasibilityClass is the infeasibility label for the PC.
      * 
      */
-    synchronized Instance feedTrainingSet(BitSet[] bloomFilterStructure, int infeasibilityClass, boolean canUpdate) {
+    synchronized Instance createTrainingSetInstance(BitSet[] bloomFilterStructure, int infeasibilityClass, boolean canUpdate) {
     	if (this.trainingSet == null) { // if training set doesn't exist yet
 			ArrayList<Attribute> attributes = new ArrayList<Attribute>();
 			int count = 0;
@@ -751,25 +771,30 @@ public final class TreePath {
 			
 			
 		}
+    	// Create Instance
     	Instance singleInstance = new DenseInstance(1025);
     	singleInstance.setDataset(this.trainingSet);
     	int count1 = 0;
+    	// Add values to the Instance
     	for (int i = 0 ; i < 16 ; i++) { // adding instance's values
 			for (int j = 0 ; j < 64 ; j++) {
 				singleInstance.setValue(count1, bloomFilterStructure[i].get(j) + "");
 				count1++;
 			}
 		}
+    	// Set class attribute
     	if (infeasibilityClass == 1) {
     		singleInstance.setValue(1024, "true");
     	} else if (infeasibilityClass == 0) {
     		singleInstance.setValue(1024, "false");
     	}
+    	
+    	// Training Classifier
     	try {
     		if(this.trainingSet.numInstances() > this.OLD_NUMINSTANCES && canUpdate) {
     			if (this.trainingSet.numInstances() == 1) { // building the first classifier model
         			System.out.println("~ start first classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format( new Date()));
-        			String[] options = weka.core.Utils.splitOptions("-H 200");
+        			String[] options = weka.core.Utils.splitOptions("-H 200"); // set hidden 200 hidden nodes
         			classifier.setOptions(options);
         			classifier.buildClassifier(this.trainingSet);
         			System.out.println("~ end first classifier training with " + this.trainingSet.numInstances() + " instances at time : " + formatter.format(new Date()));
@@ -807,25 +832,27 @@ public final class TreePath {
      */
     synchronized void PCToBloomFilterEvosuiteSeed(Collection<Clause> path) {
   		if(path != null) {
-  			Object[] clauseArray = shorten(path).toArray();
-  			String PathToString = Util.stringifyPathCondition(shorten(path));
-  			//split pc clauses into array
-  			String[] generalArray = PathToString.split(" && ");
-  			String[] specificArray = PathToString.split(" && ");
-  			//generate general clauses
-  			for (int i=0; i < generalArray.length; i++){
-  				generalArray[i]=generalArray[i].replaceAll("[0-9]", "");
-  			}
-  			//Slicing call
-  			Object[] outputSliced = SlicingManager.Slicing(specificArray, clauseArray, generalArray);
-  			String[] specificArraySliced = (String[]) outputSliced[0];
-  			String[] generalArraySliced = (String[]) outputSliced[1];
-  			BitSet[] bloomFilterStructure = bloomFilter(specificArraySliced, generalArraySliced);
-  			//add to trainingSet
-  			Instance completeInstance = this.feedTrainingSet(bloomFilterStructure, 1, true);
-  			this.trainingSet.add(completeInstance);
-  			this.createClassificationCsv("observed", "feasible", bloomFilterStructure, path);
- 
+  			if (!this.o.isSingleClausesMode()) {
+  				Object[] clauseArray = shorten(path).toArray();
+  				String PathToString = Util.stringifyPathCondition(shorten(path));
+  				//split pc clauses into array
+  				String[] generalArray = PathToString.split(" && ");
+  				String[] specificArray = PathToString.split(" && ");
+  				//generate general clauses
+  				for (int i=0; i < generalArray.length; i++){
+  					generalArray[i]=generalArray[i].replaceAll("[0-9]", "");
+  				}
+  				//Slicing call
+  				Object[] outputSliced = SlicingManager.Slicing(specificArray, clauseArray, generalArray);
+  				String[] specificArraySliced = (String[]) outputSliced[0];
+  				String[] generalArraySliced = (String[]) outputSliced[1];
+  				BitSet[] bloomFilterStructure = bloomFilter(specificArraySliced, generalArraySliced);
+  				//add to trainingSet
+  				Instance completeInstance = this.createTrainingSetInstance(bloomFilterStructure, 1, true);
+  				this.addToTrainingSet(completeInstance, "observed", "feasible", bloomFilterStructure, Util.stringifyPathCondition(shorten((Collection<Clause>) path)));
+
+
+
   				//remove the last clause and rerun the workflow
   				for (int i=specificArray.length - 1; i > 0; i--) {
   					String[] specificArrayNoLast = new String[i];
@@ -834,16 +861,30 @@ public final class TreePath {
   					System.arraycopy(specificArray, 0, specificArrayNoLast, 0, i);
   					System.arraycopy(clauseArray, 0, clauseArrayNoLast, 0, i);
   					System.arraycopy(generalArray, 0, generalArrayNoLast, 0, i);
-  					
+
   					//Slicing call
   					Object[] outputSlicedNoLast = SlicingManager.Slicing(specificArrayNoLast, clauseArrayNoLast, generalArrayNoLast);
   					String[] specificArraySlicedNoLast = (String[]) outputSlicedNoLast[0];
   					String[] generalArraySlicedNoLast = (String[]) outputSlicedNoLast[1];
   					BitSet[] bloomFilterStructureNoLast = bloomFilter(specificArraySlicedNoLast, generalArraySlicedNoLast);
-  					Instance instanceWithoutLast = this.feedTrainingSet(bloomFilterStructureNoLast, 1, true);
-  					this.trainingSet.add(instanceWithoutLast);
-  					this.createClassificationCsv("observed", "feasible", bloomFilterStructureNoLast, path);
+  					// Add to trainingSet
+  					Instance instanceWithoutLast = this.createTrainingSetInstance(bloomFilterStructureNoLast, 1, true);
+  					this.addToTrainingSet(instanceWithoutLast, "observed", "feasible", bloomFilterStructureNoLast, specificArrayNoLast.toString().replace(",", "&&"));
   				}
+  			} else {
+  				String PathToString = Util.stringifyPathCondition(shorten(path));
+  				//split pc clauses into array
+  				String[] generalArray = PathToString.split(" && ");
+  				String[] specificArray = PathToString.split(" && ");
+  				//generate general clauses
+  				for (int i=0; i < generalArray.length; i++){
+  					generalArray[i]=generalArray[i].replaceAll("[0-9]", "");
+  				}
+  				for (int i = 0 ; i < generalArray.length ; i++) {
+  					BitSet[] singleClauseBloomFilterStructure = this.bloomFilter(Arrays.copyOfRange(specificArray, i, i + 1), Arrays.copyOfRange(generalArray, i, i + 1));
+  					this.addToTrainingSet(this.createTrainingSetInstance(singleClauseBloomFilterStructure, 1, true), "observed", "feasible", singleClauseBloomFilterStructure, specificArray[i]);
+  				}
+  			}
   			
   		}
   	}
@@ -860,6 +901,8 @@ public final class TreePath {
     	for (int i = 0; i < specificArray.length; i++) {
     		//applies different hash functions to the general and specific condition
     		for (int j = 0; j < primeNumber.length; j++) {
+    			int indexGeneral;
+    			int indexSpecific;
     			long hashGeneral = primeNumber[j];
     			long hashSpecific = primeNumber[j];
     			hashGeneral = 31*hashGeneral + generalArray[i].hashCode();
@@ -867,8 +910,18 @@ public final class TreePath {
     			long hashToPositiveGeneral = hash(Math.abs(hashGeneral));
     			long hashToPositiveSpecific = hash(Math.abs(hashSpecific));
     			//resize the hashes in the range of the dimension of the two-dimensional array
-    			int indexGeneral = (int) (hashToPositiveGeneral%64);
-    			int indexSpecific = (int) (hashToPositiveSpecific%15);
+    			if (this.o.isSplitBloomFilterMode()) {
+    				if(i == specificArray.length - 1) {
+    					indexGeneral = (int) ((hashToPositiveGeneral % 16) + 48);
+    					indexSpecific = (int) (hashToPositiveSpecific % 15);
+    				} else {
+    					indexGeneral = (int) (hashToPositiveGeneral % 48);
+    					indexSpecific = (int) (hashToPositiveSpecific % 15);
+    				}
+    			} else {
+    				indexGeneral = (int) (hashToPositiveGeneral%64);
+        			indexSpecific = (int) (hashToPositiveSpecific%15);
+    			}
     			//sets the bit corresponding to the general index on the first line to 1 than
     			//sets the bit corresponding to the specific index on the column of the previous general bit to 1
     			bloomFilterStructure[0].set(indexGeneral);
@@ -876,6 +929,23 @@ public final class TreePath {
     		}  
     	}
     	return bloomFilterStructure;
+    }
+    
+    
+    /** Manage adding to the training set */
+    synchronized void addToTrainingSet(Instance instance, String type, String label, BitSet[] bloomFilterStructure, String path) {
+    	// verify if PC is already added to the training set
+    	boolean verify = false;
+    	for (Instance i : this.trainingSet) {
+    		if (instance.toString().equals(i.toString())) {
+    			verify = true;
+    		}
+    	}
+    	// add the PC to the training set if it isn't already added
+    	if (!verify) {
+    		this.trainingSet.add(instance);
+    		this.createClassificationCsv(type, label, bloomFilterStructure, path);
+    	}
     }
     
     /**
